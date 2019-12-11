@@ -5,9 +5,11 @@ use std::io::{stdin, stdout, Read, Write, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::spawn;
+use std::time::Duration;
 
 const PATH: &str = "/tmp/debug";
 const LISTEN_PORT: u16 = 62100;
+const DEBUG_MODE: bool = false;
 
 fn create_listener() -> TcpListener {
     let listen_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), LISTEN_PORT);
@@ -28,10 +30,20 @@ fn handle_connection(mut conn: TcpStream) {
     begin_reading_from_file(tx_file);
 
     loop {
+        std::thread::sleep(Duration::from_millis(10));
+
+        if DEBUG_MODE {
+            println!("Loop start");
+        }
+
         let err = conn.take_error().expect("Checking for error on conn failed");
         if let Some(err) = err {
             println!("Error on socket: {}", err);
             break;
+        }
+
+        if DEBUG_MODE {
+            println!("Receiving from file");
         }
         match rx_file.try_recv() {
             Ok(data) => conn
@@ -42,6 +54,10 @@ fn handle_connection(mut conn: TcpStream) {
                 TryRecvError::Disconnected => println!("File disconnected"),
             },
         }
+
+        if DEBUG_MODE {
+            println!("Receiving from stdin");
+        }
         match rx_stdin.try_recv() {
             Ok(data) => conn
                 .write_all(&data)
@@ -51,12 +67,19 @@ fn handle_connection(mut conn: TcpStream) {
                 TryRecvError::Disconnected => println!("Stdin disconnected"),
             },
         }
+
+        if DEBUG_MODE {
+            println!("Receiving from socket");
+        }
         match conn.read(&mut buffer) {
             Ok(_count) => {
                 print!("{}", buffer[0] as char);
                 stdout().flush().expect("Failed to flush stdout");
             },
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {},
+            Err(ref e) if e.kind() == ErrorKind::ConnectionReset => break,
+            Err(ref e) if e.kind() == ErrorKind::ConnectionAborted => break,
+            Err(ref e) if e.kind() == ErrorKind::NotConnected => break,
             Err(e) => println!("Failed to read from socket: {}", e)
         }
     }
@@ -67,6 +90,7 @@ fn begin_reading_from_stdin(tx_stdin: Sender<Vec<u8>>) {
         let mut stdin = stdin();
         let mut buf = [0; 1];
         loop {
+            std::thread::sleep(Duration::from_millis(10));
             match stdin.read(&mut buf) {
                 Ok(count) => {
                     let data = &buf[0..count];
@@ -85,6 +109,7 @@ fn begin_reading_from_file(tx_stdin: Sender<Vec<u8>>) {
         let mut file = File::open(PATH).unwrap();
         let mut buf = [0; 1];
         loop {
+            std::thread::sleep(Duration::from_millis(10));
             match file.read(&mut buf) {
                 Ok(count) => {
                     let data = &buf[0..count];
